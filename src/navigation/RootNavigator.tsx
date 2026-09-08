@@ -1,23 +1,25 @@
 /**
  * KSO Root Navigator
  *
- * Current testing flow:
+ * Authentication-aware navigation.
  *
- * App opens
+ * Flow:
+ *
+ * No user
  *    ↓
  * Welcome
  *    ↓
- * ┌───────────────┬───────────────┬───────────────┐
- * ↓               ↓               ↓
- * Get Started    Sign In         Create Account
- * ↓               ↓               ↓
- * Onboarding     Main            Main/Onboarding
+ * Sign In / Sign Up
  *
- * Guest → Main
+ * Registered user
+ *    ↓
+ * Onboarding complete?
+ *    ├── No  → Onboarding
+ *    └── Yes → Main
  *
- * NOTE:
- * Welcome is currently shown every time so the intro page
- * is always visible during development/testing.
+ * Guest
+ *    ↓
+ * Main
  */
 
 import React, {
@@ -47,9 +49,9 @@ import MainNavigator from './BottomTabNavigator';
 
 import * as preferencesService from '../services/preferencesService';
 
-// ─────────────────────────────────────────────────────────────
-// ROUTE TYPES
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
+// ROUTES
+// ─────────────────────────────────────────────
 
 export type RootStackParamList = {
   Welcome: undefined;
@@ -63,16 +65,12 @@ export type RootStackParamList = {
   Main: undefined;
 };
 
-// ─────────────────────────────────────────────────────────────
-// STACK
-// ─────────────────────────────────────────────────────────────
-
 const Stack =
   createNativeStackNavigator<RootStackParamList>();
 
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // ROOT NAVIGATOR
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
 
 export default function RootNavigator() {
   const {
@@ -85,39 +83,117 @@ export default function RootNavigator() {
     setInitialRoute,
   ] = useState<
     'Welcome' |
-    'Auth' |
     'Onboarding' |
     'Main' |
     null
   >(null);
 
-  // ─────────────────────────────────────────────
-  // DETERMINE STARTING SCREEN
-  // ─────────────────────────────────────────────
+  // ───────────────────────────────────────────
+  // DETERMINE APP STATE
+  // ───────────────────────────────────────────
 
   useEffect(() => {
-    if (authLoading) {
-      return;
-    }
+    let mounted = true;
 
-    /*
-     * DEVELOPMENT / TESTING MODE
-     *
-     * Always show Welcome first.
-     *
-     * This allows you to test:
-     * - Intro page
-     * - Get Started
-     * - Sign In
-     * - Create Account
-     * - Guest
-     */
-    setInitialRoute('Welcome');
-  }, [authLoading]);
+    const determineRoute =
+      async () => {
+        if (authLoading) {
+          return;
+        }
 
-  // ─────────────────────────────────────────────
+        /*
+         * Clear the previous route while we
+         * determine the new authentication state.
+         */
+        if (mounted) {
+          setInitialRoute(null);
+        }
+
+        // ─────────────────────────────────────
+        // NO USER
+        // ─────────────────────────────────────
+
+        if (!user) {
+          if (mounted) {
+            setInitialRoute(
+              'Welcome'
+            );
+          }
+
+          return;
+        }
+
+        // ─────────────────────────────────────
+        // GUEST
+        // ─────────────────────────────────────
+
+        if (user.isGuest) {
+          if (mounted) {
+            setInitialRoute(
+              'Main'
+            );
+          }
+
+          return;
+        }
+
+        // ─────────────────────────────────────
+        // REGISTERED USER
+        // ─────────────────────────────────────
+
+        try {
+          const prefs =
+            await preferencesService
+              .syncProfileFromSupabase();
+
+          if (!mounted) {
+            return;
+          }
+
+          if (
+            prefs.onboardingComplete
+          ) {
+            setInitialRoute(
+              'Main'
+            );
+          } else {
+            setInitialRoute(
+              'Onboarding'
+            );
+          }
+        } catch (error) {
+          console.error(
+            'Failed to load profile:',
+            error
+          );
+
+          /*
+           * A registered user without a
+           * completed profile should finish
+           * onboarding rather than being left
+           * in an unknown state.
+           */
+          if (mounted) {
+            setInitialRoute(
+              'Onboarding'
+            );
+          }
+        }
+      };
+
+    determineRoute();
+
+    return () => {
+      mounted = false;
+    };
+  }, [
+    user,
+    authLoading,
+  ]);
+
+  // ───────────────────────────────────────────
   // LOADING
-  // ─────────────────────────────────────────────
+  // ───────────────────────────────────────────
 
   if (
     authLoading ||
@@ -141,14 +217,24 @@ export default function RootNavigator() {
     );
   }
 
-  // ─────────────────────────────────────────────
+  // ───────────────────────────────────────────
   // NAVIGATOR
-  // ─────────────────────────────────────────────
+  // ───────────────────────────────────────────
 
   return (
     <Stack.Navigator
+      /*
+       * Recreate the stack when authentication
+       * state changes.
+       *
+       * Welcome/Auth → Main
+       * Welcome/Auth → Onboarding
+       * Main → Welcome after logout
+       */
       key={initialRoute}
-      initialRouteName={initialRoute}
+      initialRouteName={
+        initialRoute
+      }
       screenOptions={{
         headerShown: false,
 
@@ -164,12 +250,14 @@ export default function RootNavigator() {
       }}
     >
       {/* =====================================================
-          WELCOME / INTRO
+          WELCOME
       ===================================================== */}
 
       <Stack.Screen
         name="Welcome"
-        component={WelcomeScreen}
+        component={
+          WelcomeScreen
+        }
       />
 
       {/* =====================================================
@@ -178,7 +266,9 @@ export default function RootNavigator() {
 
       <Stack.Screen
         name="Auth"
-        component={AuthScreen}
+        component={
+          AuthScreen
+        }
       />
 
       {/* =====================================================
@@ -187,7 +277,8 @@ export default function RootNavigator() {
 
       <Stack.Screen
         name="Onboarding"
-        children={({
+      >
+        {({
           navigation,
         }) => (
           <OnboardingScreen
@@ -195,23 +286,15 @@ export default function RootNavigator() {
               data
             ) => {
               try {
-                /*
-                 * Save:
-                 * - education
-                 * - field
-                 * - interests
-                 * - location
-                 */
-
-                await preferencesService.saveOnboarding(
-                  data
-                );
+                await preferencesService
+                  .saveOnboarding(
+                    data
+                  );
 
                 /*
-                 * After onboarding,
-                 * go to Main.
+                 * Mark the app as completed
+                 * immediately after saving.
                  */
-
                 navigation.replace(
                   'Main'
                 );
@@ -222,6 +305,7 @@ export default function RootNavigator() {
                 );
               }
             }}
+
             onSkip={() => {
               navigation.replace(
                 'Main'
@@ -229,10 +313,10 @@ export default function RootNavigator() {
             }}
           />
         )}
-      />
+      </Stack.Screen>
 
       {/* =====================================================
-          MAIN APP
+          MAIN
       ===================================================== */}
 
       <Stack.Screen
@@ -245,9 +329,9 @@ export default function RootNavigator() {
   );
 }
 
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // STYLES
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
 
 const styles =
   StyleSheet.create({

@@ -1,17 +1,3 @@
-/**
- * KSO Auth Context
- *
- * Global authentication state.
- *
- * Handles:
- * - Supabase login
- * - Supabase signup
- * - Session restoration
- * - Logout
- * - Guest mode
- * - Profile sync after authentication
- */
-
 import React, {
   createContext,
   useContext,
@@ -26,10 +12,6 @@ import * as chatService from '../services/chatService';
 import * as preferencesService from '../services/preferencesService';
 
 import type { AuthUser } from '../services/authService';
-
-// ─────────────────────────────────────────────────────────────
-// TYPES
-// ─────────────────────────────────────────────────────────────
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -51,27 +33,15 @@ interface AuthContextValue {
   enterGuest: () => Promise<void>;
 }
 
-// ─────────────────────────────────────────────────────────────
-// CONTEXT
-// ─────────────────────────────────────────────────────────────
-
 const AuthContext =
   createContext<AuthContextValue>({
     user: null,
     isLoading: true,
-
     login: async () => {},
-
     signup: async () => {},
-
     logout: async () => {},
-
     enterGuest: async () => {},
   });
-
-// ─────────────────────────────────────────────────────────────
-// PROVIDER
-// ─────────────────────────────────────────────────────────────
 
 export function AuthProvider({
   children,
@@ -84,44 +54,38 @@ export function AuthProvider({
   const [isLoading, setIsLoading] =
     useState(true);
 
-  // ───────────────────────────────────────────
-  // LOAD USER PROFILE
-  // ───────────────────────────────────────────
+  // ─────────────────────────────────────────────
+  // PROFILE SYNC
+  // ─────────────────────────────────────────────
 
-  const syncProfile = useCallback(
-    async () => {
+  const syncProfile =
+    useCallback(async () => {
       try {
-        await preferencesService
-          .syncProfileFromSupabase();
+        await preferencesService.syncProfileFromSupabase();
       } catch (error) {
         console.error(
           'Profile sync failed:',
           error
         );
       }
-    },
-    []
-  );
+    }, []);
 
-  // ───────────────────────────────────────────
-  // INITIAL AUTH CHECK
-  // ───────────────────────────────────────────
+  // ─────────────────────────────────────────────
+  // INITIAL AUTH
+  // ─────────────────────────────────────────────
 
   useEffect(() => {
     let mounted = true;
 
-    const initializeAuth = async () => {
+    const initialize = async () => {
       try {
         const currentUser =
           await authService.getCurrentUser();
 
-        if (!mounted) {
-          return;
-        }
+        if (!mounted) return;
 
         setUser(currentUser);
 
-        // Sync profile for registered users
         if (
           currentUser &&
           !currentUser.isGuest
@@ -130,7 +94,7 @@ export function AuthProvider({
         }
       } catch (error) {
         console.error(
-          'Failed to initialize authentication:',
+          'Authentication initialization failed:',
           error
         );
 
@@ -144,15 +108,12 @@ export function AuthProvider({
       }
     };
 
-    initializeAuth();
+    initialize();
 
-    // Listen for Supabase auth changes
     const unsubscribe =
       authService.onAuthStateChange(
         async (nextUser) => {
-          if (!mounted) {
-            return;
-          }
+          if (!mounted) return;
 
           setUser(nextUser);
 
@@ -171,47 +132,23 @@ export function AuthProvider({
     };
   }, [syncProfile]);
 
-  // ───────────────────────────────────────────
+  // ─────────────────────────────────────────────
   // LOGIN
-  // ───────────────────────────────────────────
+  // ─────────────────────────────────────────────
 
   const login = useCallback(
     async (
       email: string,
       password: string
     ) => {
-      const cleanEmail =
-        email.trim().toLowerCase();
-
-      if (!cleanEmail) {
-        throw new Error(
-          'Email is required.'
-        );
-      }
-
-      if (!password) {
-        throw new Error(
-          'Password is required.'
-        );
-      }
-
       const authenticatedUser =
         await authService.signIn(
-          cleanEmail,
+          email,
           password
         );
 
-      if (!authenticatedUser) {
-        throw new Error(
-          'Login failed. Please try again.'
-        );
-      }
+      setUser(authenticatedUser);
 
-      setUser(
-        authenticatedUser
-      );
-
-      // Load saved profile/preferences
       if (
         !authenticatedUser.isGuest
       ) {
@@ -221,9 +158,9 @@ export function AuthProvider({
     [syncProfile]
   );
 
-  // ───────────────────────────────────────────
-  // SIGN UP
-  // ───────────────────────────────────────────
+  // ─────────────────────────────────────────────
+  // SIGNUP
+  // ─────────────────────────────────────────────
 
   const signup = useCallback(
     async (
@@ -231,43 +168,13 @@ export function AuthProvider({
       password: string,
       name?: string
     ) => {
-      const cleanEmail =
-        email.trim().toLowerCase();
-
-      if (!cleanEmail) {
-        throw new Error(
-          'Email is required.'
-        );
-      }
-
-      if (password.length < 6) {
-        throw new Error(
-          'Password must be at least 6 characters.'
-        );
-      }
-
-      const cleanName =
-        name?.trim() || undefined;
-
       const newUser =
         await authService.signUp(
-          cleanEmail,
+          email,
           password,
-          cleanName
+          name
         );
 
-      if (!newUser) {
-        throw new Error(
-          'Account creation failed.'
-        );
-      }
-
-      /*
-       * Link any existing guest chat.
-       *
-       * This should not prevent account creation
-       * if the chat linking fails.
-       */
       try {
         await chatService.linkGuestChatToUser(
           newUser.id
@@ -281,14 +188,6 @@ export function AuthProvider({
 
       setUser(newUser);
 
-      /*
-       * If Supabase has already created a session,
-       * synchronize the profile immediately.
-       *
-       * If email confirmation is enabled,
-       * the user may need to verify their email
-       * before a session exists.
-       */
       if (!newUser.isGuest) {
         await syncProfile();
       }
@@ -296,27 +195,52 @@ export function AuthProvider({
     [syncProfile]
   );
 
-  // ───────────────────────────────────────────
+  // ─────────────────────────────────────────────
   // LOGOUT
-  // ───────────────────────────────────────────
+  // ─────────────────────────────────────────────
 
   const logout = useCallback(
     async () => {
       try {
+        // Tell Supabase to end the session.
         await authService.signOut();
+      } catch (error) {
+        console.error(
+          'Supabase sign out failed:',
+          error
+        );
+
+        /*
+         * We still clear local auth state.
+         * This prevents the user from being
+         * stuck inside the app if the server
+         * returns an error.
+         */
       } finally {
+        // Always remove the authenticated user
+        // from the React state.
         setUser(null);
+
+        // Clear any local guest state as well.
+        try {
+          await authService.exitGuestMode();
+        } catch (error) {
+          console.error(
+            'Guest cleanup failed:',
+            error
+          );
+        }
       }
     },
     []
   );
 
-  // ───────────────────────────────────────────
-  // GUEST MODE
-  // ───────────────────────────────────────────
+  // ─────────────────────────────────────────────
+  // GUEST
+  // ─────────────────────────────────────────────
 
-  const enterGuest = useCallback(
-    async () => {
+  const enterGuest =
+    useCallback(async () => {
       await authService.enterGuestMode();
 
       setUser({
@@ -324,13 +248,7 @@ export function AuthProvider({
         email: '',
         isGuest: true,
       });
-    },
-    []
-  );
-
-  // ───────────────────────────────────────────
-  // PROVIDER
-  // ───────────────────────────────────────────
+    }, []);
 
   return (
     <AuthContext.Provider
@@ -348,12 +266,6 @@ export function AuthProvider({
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// HOOK
-// ─────────────────────────────────────────────────────────────
-
 export function useAuth() {
-  return useContext(
-    AuthContext
-  );
+  return useContext(AuthContext);
 }

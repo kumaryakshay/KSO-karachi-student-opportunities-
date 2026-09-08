@@ -8,6 +8,7 @@
  * - Resume upload
  * - AI resume matching
  * - Mandatory notifications
+ * - Reliable sign out
  */
 
 import React, {
@@ -30,6 +31,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 
 import { colors } from '../theme/colors';
+
 import {
   fontSize,
   fontWeight,
@@ -100,6 +102,11 @@ export default function ProfileScreen({
     setIsMatching,
   ] = useState(false);
 
+  const [
+    isSigningOut,
+    setIsSigningOut,
+  ] = useState(false);
+
   // ─────────────────────────────────────────────
   // LOAD PROFILE DATA
   // ─────────────────────────────────────────────
@@ -163,6 +170,7 @@ export default function ProfileScreen({
           'Sign In Required',
           'Please sign in to upload your resume.'
         );
+
         return;
       }
 
@@ -195,6 +203,7 @@ export default function ProfileScreen({
             'Invalid File',
             'Please select a PDF file.'
           );
+
           return;
         }
 
@@ -236,6 +245,7 @@ export default function ProfileScreen({
           'Sign In Required',
           'Please sign in to use AI resume matching.'
         );
+
         return;
       }
 
@@ -244,6 +254,7 @@ export default function ProfileScreen({
           'No Resume',
           'Please upload your resume first.'
         );
+
         return;
       }
 
@@ -279,6 +290,7 @@ export default function ProfileScreen({
           'Sign In Required',
           'Please sign in to receive personalized notifications.'
         );
+
         return;
       }
 
@@ -292,6 +304,10 @@ export default function ProfileScreen({
   // ─────────────────────────────────────────────
 
   const handleLogout = () => {
+    if (isSigningOut) {
+      return;
+    }
+
     Alert.alert(
       'Sign Out',
       'Are you sure you want to sign out?',
@@ -303,8 +319,44 @@ export default function ProfileScreen({
         {
           text: 'Sign Out',
           style: 'destructive',
+
           onPress: async () => {
-            await logout();
+            if (isSigningOut) {
+              return;
+            }
+
+            try {
+              setIsSigningOut(true);
+
+              console.log(
+                'Starting sign out...'
+              );
+
+              await logout();
+
+              console.log(
+                'Sign out completed.'
+              );
+
+              /*
+               * RootNavigator listens to the auth
+               * state and will move the user out
+               * of the authenticated area.
+               */
+            } catch (error: any) {
+              console.error(
+                'Sign out error:',
+                error
+              );
+
+              Alert.alert(
+                'Sign Out Failed',
+                error?.message ||
+                  'Could not sign out. Please try again.'
+              );
+            } finally {
+              setIsSigningOut(false);
+            }
           },
         },
       ]
@@ -315,23 +367,27 @@ export default function ProfileScreen({
   // SETTINGS
   // ─────────────────────────────────────────────
 
-  const SETTINGS_SECTIONS: SettingsSection[] =
-    [
+  const SETTINGS_SECTIONS:
+    SettingsSection[] = [
       {
         title: 'Account',
+
         items: [
           {
             icon: 'school-outline',
             label: 'Education Level',
           },
+
           {
             icon: 'book-outline',
             label: 'Field of Study',
           },
+
           {
             icon: 'heart-outline',
             label: 'Interests',
           },
+
           {
             icon: 'stats-chart-outline',
             label: 'GPA',
@@ -341,9 +397,11 @@ export default function ProfileScreen({
 
       {
         title: 'Preferences',
+
         items: [
           {
-            icon: 'notifications-outline',
+            icon:
+              'notifications-outline',
             label: 'Notifications',
             onPress:
               handleNotifications,
@@ -356,7 +414,8 @@ export default function ProfileScreen({
           },
 
           {
-            icon: 'language-outline',
+            icon:
+              'language-outline',
             label: 'Language',
           },
         ],
@@ -364,16 +423,20 @@ export default function ProfileScreen({
 
       {
         title: 'About',
+
         items: [
           {
             icon:
               'information-circle-outline',
             label: 'About KSO',
           },
+
           {
-            icon: 'shield-outline',
+            icon:
+              'shield-outline',
             label: 'Privacy Policy',
           },
+
           {
             icon:
               'document-outline',
@@ -501,7 +564,10 @@ export default function ProfileScreen({
               handleUploadResume
             }
             activeOpacity={0.7}
-            disabled={isUploading}
+            disabled={
+              isUploading ||
+              isSigningOut
+            }
           >
             <View
               style={
@@ -511,7 +577,9 @@ export default function ProfileScreen({
               <Ionicons
                 name="document-text-outline"
                 size={iconSize.md}
-                color={colors.primary}
+                color={
+                  colors.primary
+                }
               />
             </View>
 
@@ -567,7 +635,8 @@ export default function ProfileScreen({
 
           <View
             style={{
-              marginTop: spacing.md,
+              marginTop:
+                spacing.md,
             }}
           >
             <PrimaryButton
@@ -585,7 +654,8 @@ export default function ProfileScreen({
               disabled={
                 isGuest ||
                 !resumePath ||
-                isMatching
+                isMatching ||
+                isSigningOut
               }
             />
           </View>
@@ -624,12 +694,17 @@ export default function ProfileScreen({
               {section.items.map(
                 (item) => (
                   <TouchableOpacity
-                    key={item.label}
+                    key={
+                      item.label
+                    }
                     style={
                       styles.settingsRow
                     }
                     onPress={
                       item.onPress
+                    }
+                    disabled={
+                      isSigningOut
                     }
                     activeOpacity={
                       item.onPress
@@ -674,9 +749,9 @@ export default function ProfileScreen({
                         <Text
                           style={
                             styles.requiredBadgeText
-                          }
-                        >
-                          Required
+                        }
+                      >
+                        Required
                         </Text>
                       </View>
                     ) : (
@@ -710,6 +785,9 @@ export default function ProfileScreen({
                 }
               )
             }
+            disabled={
+              isSigningOut
+            }
           >
             <Ionicons
               name="log-in-outline"
@@ -729,25 +807,44 @@ export default function ProfileScreen({
           </TouchableOpacity>
         ) : (
           <TouchableOpacity
-            style={
-              styles.signOutBtn
-            }
+            style={[
+              styles.signOutBtn,
+              isSigningOut &&
+                styles.signOutBtnDisabled,
+            ]}
             onPress={
               handleLogout
             }
+            disabled={
+              isSigningOut
+            }
+            activeOpacity={0.7}
           >
-            <Ionicons
-              name="log-out-outline"
-              size={iconSize.md}
-              color={colors.error}
-            />
+            {isSigningOut ? (
+              <ActivityIndicator
+                size="small"
+                color={
+                  colors.error
+                }
+              />
+            ) : (
+              <Ionicons
+                name="log-out-outline"
+                size={iconSize.md}
+                color={
+                  colors.error
+                }
+              />
+            )}
 
             <Text
               style={
                 styles.signOutText
               }
             >
-              Sign Out
+              {isSigningOut
+                ? 'Signing Out...'
+                : 'Sign Out'}
             </Text>
           </TouchableOpacity>
         )}
@@ -762,7 +859,8 @@ export default function ProfileScreen({
 
         <View
           style={{
-            height: spacing.xxl,
+            height:
+              spacing.xxl,
           }}
         />
       </ScrollView>
@@ -802,7 +900,8 @@ const styles =
         colors.surface,
       borderRadius:
         borderRadius.md,
-      padding: spacing.md,
+      padding:
+        spacing.md,
       alignItems: 'center',
       borderWidth: 1,
       borderColor:
@@ -810,20 +909,24 @@ const styles =
     },
 
     infoLabel: {
-      fontSize: fontSize.xs,
+      fontSize:
+        fontSize.xs,
       color:
         colors.textTertiary,
-      marginTop: spacing.xs,
+      marginTop:
+        spacing.xs,
     },
 
     infoValue: {
-      fontSize: fontSize.sm,
+      fontSize:
+        fontSize.sm,
       color:
         colors.textSecondary,
       fontWeight:
         fontWeight.medium,
       marginTop: 2,
-      textAlign: 'center',
+      textAlign:
+        'center',
     },
 
     aiSection: {
@@ -861,24 +964,28 @@ const styles =
     },
 
     resumeLabel: {
-      fontSize: fontSize.base,
+      fontSize:
+        fontSize.base,
       fontWeight:
         fontWeight.medium,
       color: colors.text,
     },
 
     resumeSubtext: {
-      fontSize: fontSize.xs,
+      fontSize:
+        fontSize.xs,
       color:
         colors.textTertiary,
       marginTop: 2,
     },
 
     aiHint: {
-      fontSize: fontSize.sm,
+      fontSize:
+        fontSize.sm,
       color:
         colors.textTertiary,
-      textAlign: 'center',
+      textAlign:
+        'center',
       marginTop:
         spacing.sm,
     },
@@ -891,7 +998,8 @@ const styles =
     },
 
     sectionTitle: {
-      fontSize: fontSize.sm,
+      fontSize:
+        fontSize.sm,
       fontWeight:
         fontWeight.semibold,
       color:
@@ -1014,6 +1122,10 @@ const styles =
         colors.error,
     },
 
+    signOutBtnDisabled: {
+      opacity: 0.6,
+    },
+
     signOutText: {
       fontSize:
         fontSize.base,
@@ -1024,7 +1136,8 @@ const styles =
     },
 
     version: {
-      textAlign: 'center',
+      textAlign:
+        'center',
       fontSize:
         fontSize.xs,
       color:
