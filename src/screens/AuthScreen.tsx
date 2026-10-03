@@ -6,7 +6,7 @@
  * Create User → Supabase → Onboarding
  */
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 
 import {
   View,
@@ -78,6 +78,42 @@ export default function AuthScreen({
 
   const [showPassword, setShowPassword] =
     useState(false);
+
+  // Navigate only after the authentication request has completed.
+  // If the screen is nested, also try the parent navigator.
+  const goToScreen = useCallback(
+    (screenName: string) => {
+      try {
+        navigation.replace(screenName);
+        return;
+      } catch (replaceError) {
+        console.error(
+          `[KSO] navigation.replace(${screenName}) failed:`,
+          replaceError
+        );
+      }
+
+      try {
+        const parent = navigation.getParent?.();
+
+        if (parent) {
+          parent.navigate(screenName);
+          return;
+        }
+      } catch (parentError) {
+        console.error(
+          `[KSO] parent navigation to ${screenName} failed:`,
+          parentError
+        );
+      }
+
+      Alert.alert(
+        'Navigation Error',
+        `Account was created, but the ${screenName} screen could not be opened. Please check that ${screenName} is registered in your navigator.`
+      );
+    },
+    [navigation]
+  );
 
   // ─────────────────────────────────────────────
   // SUBMIT
@@ -163,10 +199,7 @@ export default function AuthScreen({
           '[KSO] Account created successfully'
         );
 
-        navigation.replace(
-          'Onboarding'
-        );
-
+        goToScreen('Onboarding');
         return;
       }
 
@@ -198,9 +231,7 @@ export default function AuthScreen({
        * Supabase has created the session.
        * Now go directly to Main.
        */
-      navigation.replace(
-        'Main'
-      );
+      goToScreen('Main');
     } catch (error: any) {
       console.error(
         '[KSO] Authentication error:',
@@ -240,6 +271,32 @@ export default function AuthScreen({
         Alert.alert(
           'Supabase Configuration Error',
           'Supabase is not configured correctly. Check your environment variables.'
+        );
+      } else if (
+        message.includes('already registered') ||
+        message.includes('user already registered')
+      ) {
+        Alert.alert(
+          'Account Already Exists',
+          'An account with this email already exists. Please sign in instead.'
+        );
+      } else if (
+        message.includes('password') &&
+        message.includes('weak')
+      ) {
+        Alert.alert(
+          'Weak Password',
+          'Please use a stronger password with at least 6 characters.'
+        );
+      } else if (
+        message.includes('network') ||
+        message.includes('fetch') ||
+        message.includes('timeout') ||
+        message.includes('failed to fetch')
+      ) {
+        Alert.alert(
+          'Connection Error',
+          'Unable to connect to KSO right now. Please check your internet connection and try again.'
         );
       } else {
         Alert.alert(

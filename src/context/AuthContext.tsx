@@ -1,3 +1,4 @@
+tsx
 import React, {
   createContext,
   useContext,
@@ -93,14 +94,9 @@ export function AuthProvider({
   children: ReactNode;
 }) {
   const [user, setUser] = useState<AuthUser | null>(null);
-
   const [isLoading, setIsLoading] = useState(true);
 
-  // Prevent multiple login/signup/logout operations
-  // from running at the same time.
   const authOperationInProgress = useRef(false);
-
-  // Prevent state updates after provider unmount.
   const mountedRef = useRef(true);
 
   // ─────────────────────────────────────────────
@@ -115,8 +111,8 @@ export function AuthProvider({
 
       console.log('KSO AUTH: Profile sync completed.');
     } catch (error) {
-      // Profile syncing is not part of authentication.
-      // Never allow it to break login/signup.
+      // IMPORTANT:
+      // Profile sync must NEVER break authentication.
       console.error(
         'KSO AUTH: Profile sync failed:',
         error
@@ -153,12 +149,12 @@ export function AuthProvider({
           currentUser
         );
 
-        // Sync profile only for real authenticated users.
+        // Do NOT block authentication on profile sync.
         if (
           currentUser &&
           !currentUser.isGuest
         ) {
-          await syncProfile();
+          void syncProfile();
         }
       } catch (error) {
         console.error(
@@ -176,7 +172,7 @@ export function AuthProvider({
       }
     };
 
-    initializeAuthentication();
+    void initializeAuthentication();
 
     // ───────────────────────────────────────────
     // AUTH STATE LISTENER
@@ -197,12 +193,13 @@ export function AuthProvider({
 
             setUser(nextUser);
 
-            // Only sync profiles for real users.
+            // IMPORTANT:
+            // Do not wait for profile sync here.
             if (
               nextUser &&
               !nextUser.isGuest
             ) {
-              await syncProfile();
+              void syncProfile();
             }
           }
         );
@@ -291,10 +288,10 @@ export function AuthProvider({
           authenticatedUser
         );
 
-        // Profile sync is optional and must not
-        // cause login to fail.
+        // Profile sync is completely optional.
+        // Never make login depend on it.
         if (!authenticatedUser.isGuest) {
-          await syncProfile();
+          void syncProfile();
         }
 
         console.log(
@@ -405,8 +402,6 @@ export function AuthProvider({
           newUser
         );
 
-        // Never continue if signup did not
-        // return a user object.
         if (!newUser) {
           throw new Error(
             'Account creation failed. No user was returned.'
@@ -420,14 +415,16 @@ export function AuthProvider({
         }
 
         // ─────────────────────────────────────
-        // UPDATE AUTH STATE FIRST
+        // AUTH STATE FIRST
         // ─────────────────────────────────────
-
-        // This is deliberately done BEFORE chat
-        // or profile operations.
         //
-        // Account creation itself should not depend
-        // on those optional services.
+        // THIS IS THE MOST IMPORTANT PART.
+        //
+        // Once the account is created, update the
+        // application state immediately.
+        //
+        // Chat/profile operations happen AFTER this
+        // and cannot make signup fail.
 
         if (mountedRef.current) {
           setUser(newUser);
@@ -438,39 +435,45 @@ export function AuthProvider({
         );
 
         // ─────────────────────────────────────
-        // LINK GUEST CHAT
+        // OPTIONAL BACKGROUND OPERATIONS
         // ─────────────────────────────────────
+        //
+        // These operations are intentionally NOT awaited.
+        // They must never block account creation/navigation.
 
         if (!newUser.isGuest) {
-          try {
-            console.log(
-              'KSO AUTH: Linking guest chat...'
-            );
+          void (async () => {
+            try {
+              console.log(
+                'KSO AUTH: Linking guest chat...'
+              );
 
-            await chatService.linkGuestChatToUser(
-              newUser.id
-            );
+              await chatService.linkGuestChatToUser(
+                newUser.id
+              );
 
-            console.log(
-              'KSO AUTH: Guest chat linked successfully.'
-            );
-          } catch (error) {
-            // This is optional functionality.
-            // It must NEVER cancel successful signup.
-            console.error(
-              'KSO AUTH: Guest chat linking failed:',
-              error
-            );
-          }
+              console.log(
+                'KSO AUTH: Guest chat linked successfully.'
+              );
+            } catch (error) {
+              console.error(
+                'KSO AUTH: Guest chat linking failed:',
+                error
+              );
+            }
+          })();
+
+          void syncProfile();
         }
 
         // ─────────────────────────────────────
-        // PROFILE SYNC
+        // IMPORTANT
         // ─────────────────────────────────────
-
-        if (!newUser.isGuest) {
-          await syncProfile();
-        }
+        //
+        // Signup is considered successful here.
+        //
+        // Navigation/auth state can continue without
+        // waiting for chat or profile synchronization.
 
         console.log(
           'KSO AUTH: ACCOUNT CREATION COMPLETED.'
@@ -519,7 +522,6 @@ export function AuthProvider({
           'KSO AUTH: Supabase logout successful.'
         );
       } catch (error) {
-        // We still clear local state below.
         console.error(
           'KSO AUTH: Supabase sign out failed:',
           error
