@@ -53,8 +53,17 @@ const AuthContext = createContext<AuthContextValue>({
 });
 
 // ─────────────────────────────────────────────
-// ERROR HELPER
+// HELPERS
 // ─────────────────────────────────────────────
+
+function isRecord(
+  value: unknown
+): value is Record<string, unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null
+  );
+}
 
 function getErrorMessage(
   error: unknown,
@@ -64,23 +73,98 @@ function getErrorMessage(
     return error.message;
   }
 
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'message' in error
-  ) {
-    const message = (error as { message?: unknown }).message;
+  if (isRecord(error)) {
+    const message = error.message;
 
-    if (typeof message === 'string' && message.trim()) {
+    if (
+      typeof message === 'string' &&
+      message.trim()
+    ) {
       return message;
     }
   }
 
-  if (typeof error === 'string' && error.trim()) {
+  if (
+    typeof error === 'string' &&
+    error.trim()
+  ) {
     return error;
   }
 
   return fallback;
+}
+
+/**
+ * Supports all of these possible service responses:
+ *
+ * 1. AuthUser
+ * 2. { user: AuthUser }
+ * 3. { data: { user: AuthUser } }
+ */
+function extractAuthUser(
+  result: unknown
+): AuthUser | null {
+  if (!result) {
+    return null;
+  }
+
+  if (!isRecord(result)) {
+    return null;
+  }
+
+  // Direct AuthUser
+  if (
+    typeof result.id === 'string' &&
+    result.id.trim()
+  ) {
+    return result as AuthUser;
+  }
+
+  // { user: AuthUser }
+  if (result.user) {
+    const user = result.user;
+
+    if (
+      isRecord(user) &&
+      typeof user.id === 'string' &&
+      user.id.trim()
+    ) {
+      return user as AuthUser;
+    }
+  }
+
+  // { data: { user: AuthUser } }
+  if (
+    result.data &&
+    isRecord(result.data) &&
+    result.data.user
+  ) {
+    const user = result.data.user;
+
+    if (
+      isRecord(user) &&
+      typeof user.id === 'string' &&
+      user.id.trim()
+    ) {
+      return user as AuthUser;
+    }
+  }
+
+  return null;
+}
+
+function getResultError(
+  result: unknown
+): unknown {
+  if (!isRecord(result)) {
+    return null;
+  }
+
+  if (result.error) {
+    return result.error;
+  }
+
+  return null;
 }
 
 // ─────────────────────────────────────────────
@@ -92,11 +176,17 @@ export function AuthProvider({
 }: {
   children: ReactNode;
 }) {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [user, setUser] =
+    useState<AuthUser | null>(null);
 
-  const authOperationInProgress = useRef(false);
-  const mountedRef = useRef(true);
+  const [isLoading, setIsLoading] =
+    useState(true);
+
+  const authOperationInProgress =
+    useRef(false);
+
+  const mountedRef =
+    useRef(true);
 
   // ─────────────────────────────────────────────
   // PROFILE SYNC
@@ -104,14 +194,16 @@ export function AuthProvider({
 
   const syncProfile = useCallback(async () => {
     try {
-      console.log('KSO AUTH: Starting profile sync...');
+      console.log(
+        'KSO AUTH: Starting profile sync...'
+      );
 
       await preferencesService.syncProfileFromSupabase();
 
-      console.log('KSO AUTH: Profile sync completed.');
+      console.log(
+        'KSO AUTH: Profile sync completed.'
+      );
     } catch (error) {
-      // IMPORTANT:
-      // Profile sync must NEVER break authentication.
       console.error(
         'KSO AUTH: Profile sync failed:',
         error
@@ -126,50 +218,52 @@ export function AuthProvider({
   useEffect(() => {
     mountedRef.current = true;
 
-    let unsubscribe: (() => void) | undefined;
+    let unsubscribe:
+      | (() => void)
+      | undefined;
 
-    const initializeAuthentication = async () => {
-      try {
-        console.log(
-          'KSO AUTH: Checking existing authentication...'
-        );
+    const initializeAuthentication =
+      async () => {
+        try {
+          console.log(
+            'KSO AUTH: Checking existing authentication...'
+          );
 
-        const currentUser =
-          await authService.getCurrentUser();
+          const currentUser =
+            await authService.getCurrentUser();
 
-        if (!mountedRef.current) {
-          return;
+          if (!mountedRef.current) {
+            return;
+          }
+
+          setUser(currentUser);
+
+          console.log(
+            'KSO AUTH: Existing user:',
+            currentUser
+          );
+
+          if (
+            currentUser &&
+            !currentUser.isGuest
+          ) {
+            void syncProfile();
+          }
+        } catch (error) {
+          console.error(
+            'KSO AUTH: Authentication initialization failed:',
+            error
+          );
+
+          if (mountedRef.current) {
+            setUser(null);
+          }
+        } finally {
+          if (mountedRef.current) {
+            setIsLoading(false);
+          }
         }
-
-        setUser(currentUser);
-
-        console.log(
-          'KSO AUTH: Existing user:',
-          currentUser
-        );
-
-        // Do NOT block authentication on profile sync.
-        if (
-          currentUser &&
-          !currentUser.isGuest
-        ) {
-          void syncProfile();
-        }
-      } catch (error) {
-        console.error(
-          'KSO AUTH: Authentication initialization failed:',
-          error
-        );
-
-        if (mountedRef.current) {
-          setUser(null);
-        }
-      } finally {
-        if (mountedRef.current) {
-          setIsLoading(false);
-        }
-      }
-    };
+      };
 
     void initializeAuthentication();
 
@@ -192,8 +286,6 @@ export function AuthProvider({
 
             setUser(nextUser);
 
-            // IMPORTANT:
-            // Do not wait for profile sync here.
             if (
               nextUser &&
               !nextUser.isGuest
@@ -260,15 +352,30 @@ export function AuthProvider({
           'KSO AUTH: Starting login...'
         );
 
-        const authenticatedUser =
+        const loginResult =
           await authService.signIn(
             cleanEmail,
             password
           );
 
+        const serviceError =
+          getResultError(loginResult);
+
+        if (serviceError) {
+          throw new Error(
+            getErrorMessage(
+              serviceError,
+              'Unable to login.'
+            )
+          );
+        }
+
+        const authenticatedUser =
+          extractAuthUser(loginResult);
+
         if (!authenticatedUser) {
           throw new Error(
-            'Login failed. No user was returned.'
+            'Login failed. No valid user was returned.'
           );
         }
 
@@ -287,8 +394,6 @@ export function AuthProvider({
           authenticatedUser
         );
 
-        // Profile sync is completely optional.
-        // Never make login depend on it.
         if (!authenticatedUser.isGuest) {
           void syncProfile();
         }
@@ -309,7 +414,8 @@ export function AuthProvider({
           )
         );
       } finally {
-        authOperationInProgress.current = false;
+        authOperationInProgress.current =
+          false;
       }
     },
     [syncProfile]
@@ -339,9 +445,7 @@ export function AuthProvider({
           ? name.trim()
           : '';
 
-      // ───────────────────────────────────────
-      // VALIDATION
-      // ───────────────────────────────────────
+      // Validation
 
       if (!cleanName) {
         throw new Error(
@@ -389,7 +493,7 @@ export function AuthProvider({
         // CREATE ACCOUNT
         // ─────────────────────────────────────
 
-        const newUser =
+        const signupResult =
           await authService.signUp(
             cleanEmail,
             password,
@@ -398,12 +502,34 @@ export function AuthProvider({
 
         console.log(
           'KSO AUTH: Signup service returned:',
-          newUser
+          signupResult
         );
+
+        // Handle services that return { error }
+        const serviceError =
+          getResultError(signupResult);
+
+        if (serviceError) {
+          throw new Error(
+            getErrorMessage(
+              serviceError,
+              'Unable to create your account.'
+            )
+          );
+        }
+
+        // IMPORTANT:
+        // Accept either:
+        // AuthUser
+        // { user: AuthUser }
+        // { data: { user: AuthUser } }
+
+        const newUser =
+          extractAuthUser(signupResult);
 
         if (!newUser) {
           throw new Error(
-            'Account creation failed. No user was returned.'
+            'Account creation failed. No valid user was returned from Supabase.'
           );
         }
 
@@ -413,17 +539,14 @@ export function AuthProvider({
           );
         }
 
+        console.log(
+          'KSO AUTH: New user:',
+          newUser
+        );
+
         // ─────────────────────────────────────
-        // AUTH STATE FIRST
+        // UPDATE AUTH STATE FIRST
         // ─────────────────────────────────────
-        //
-        // THIS IS THE MOST IMPORTANT PART.
-        //
-        // Once the account is created, update the
-        // application state immediately.
-        //
-        // Chat/profile operations happen AFTER this
-        // and cannot make signup fail.
 
         if (mountedRef.current) {
           setUser(newUser);
@@ -434,11 +557,8 @@ export function AuthProvider({
         );
 
         // ─────────────────────────────────────
-        // OPTIONAL BACKGROUND OPERATIONS
+        // BACKGROUND OPERATIONS
         // ─────────────────────────────────────
-        //
-        // These operations are intentionally NOT awaited.
-        // They must never block account creation/navigation.
 
         if (!newUser.isGuest) {
           void (async () => {
@@ -465,15 +585,6 @@ export function AuthProvider({
           void syncProfile();
         }
 
-        // ─────────────────────────────────────
-        // IMPORTANT
-        // ─────────────────────────────────────
-        //
-        // Signup is considered successful here.
-        //
-        // Navigation/auth state can continue without
-        // waiting for chat or profile synchronization.
-
         console.log(
           'KSO AUTH: ACCOUNT CREATION COMPLETED.'
         );
@@ -490,7 +601,8 @@ export function AuthProvider({
           )
         );
       } finally {
-        authOperationInProgress.current = false;
+        authOperationInProgress.current =
+          false;
       }
     },
     [syncProfile]
@@ -544,7 +656,8 @@ export function AuthProvider({
         'KSO AUTH: Logout completed.'
       );
     } finally {
-      authOperationInProgress.current = false;
+      authOperationInProgress.current =
+        false;
     }
   }, []);
 
@@ -594,7 +707,8 @@ export function AuthProvider({
         )
       );
     } finally {
-      authOperationInProgress.current = false;
+      authOperationInProgress.current =
+        false;
     }
   }, []);
 
